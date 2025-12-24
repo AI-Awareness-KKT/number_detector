@@ -5,8 +5,11 @@
   <title>Number Detector</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <!-- TensorFlow.js (REQUIRED for digit detection) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.8.0/dist/tf.min.js"></script>
+
+  <!-- Main Styles -->
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
 
@@ -22,18 +25,23 @@
 
   <!-- MAIN GAME AREA -->
   <main class="container">
+    <!-- Live Camera Feed -->
     <video id="video" autoplay playsinline></video>
 
-    <canvas id="canvas"></canvas>
+    <!-- Hidden canvas used for image preprocessing -->
+    <canvas id="canvas" style="display:none;"></canvas>
 
+    <!-- Action Button -->
     <button id="detectBtn">Detect Number</button>
 
+    <!-- Result -->
     <div class="result">
       Detected Number:
       <span id="output">—</span>
     </div>
   </main>
 
+  <!-- Game Logic -->
   <script src="js/app.js"></script>
 </body>
 </html>
