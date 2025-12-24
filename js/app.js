@@ -3,12 +3,11 @@ const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const detectBtn = document.getElementById("detectBtn");
 
-let modelLoaded = false;
 let model;
 
-/* =============================
-   CAMERA
-============================= */
+/* =========================
+   START CAMERA
+========================= */
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" },
@@ -18,38 +17,29 @@ async function startCamera() {
   await video.play();
 }
 
-/* =============================
+/* =========================
    LOAD MODEL (GITHUB HOSTED)
-============================= */
+========================= */
 async function loadModel() {
-  try {
-    output.textContent = "Loading model...";
-
-    model = await tf.loadLayersModel(
-      "https://hpssjellis.github.io/beginner-tensorflowjs-examples-in-javascript/saved-models/mnist/convnet/model.json"
-    );
-
-    // warm up
-    model.predict(tf.zeros([1, 28, 28, 1]));
-    modelLoaded = true;
-    output.textContent = "Ready";
-  } catch (err) {
-    console.error(err);
-    output.textContent = "Model failed to load";
-  }
+  model = await tf.loadLayersModel(
+    "https://hpssjellis.github.io/beginner-tensorflowjs-examples-in-javascript/saved-models/mnist/convnet/model.json"
+  );
+  model.predict(tf.zeros([1, 28, 28, 1])); // warm-up
+  output.textContent = "Ready";
 }
 
-/* =============================
-   PREPROCESS
-============================= */
-function preprocess() {
+/* =========================
+   PREPROCESS FRAME
+========================= */
+function getInputTensor() {
   const size = 28;
   const ctx = canvas.getContext("2d");
 
   const vw = video.videoWidth;
   const vh = video.videoHeight;
-  const crop = Math.min(vw, vh) * 0.6;
 
+  // simple center crop
+  const crop = Math.min(vw, vh) * 0.6;
   const sx = (vw - crop) / 2;
   const sy = (vh - crop) / 2;
 
@@ -59,43 +49,44 @@ function preprocess() {
   ctx.drawImage(video, sx, sy, crop, crop, 0, 0, size, size);
 
   const img = ctx.getImageData(0, 0, size, size).data;
-  const arr = new Float32Array(size * size);
+  const data = new Float32Array(size * size);
 
   for (let i = 0, j = 0; i < img.length; i += 4, j++) {
     const gray = (img[i] + img[i + 1] + img[i + 2]) / 3;
-    arr[j] = (255 - gray) / 255;
+    data[j] = (255 - gray) / 255; // invert + normalize
   }
 
-  return tf.tensor4d(arr, [1, size, size, 1]);
+  return tf.tensor4d(data, [1, size, size, 1]);
 }
 
-/* =============================
-   DETECT
-============================= */
+/* =========================
+   DETECT BUTTON
+========================= */
 detectBtn.onclick = async () => {
-  if (!modelLoaded) {
+  if (!model) {
     output.textContent = "Model not ready";
     return;
   }
 
   output.textContent = "Detecting...";
 
-  const input = preprocess();
-  const pred = model.predict(input);
-  const scores = pred.dataSync();
+  const input = getInputTensor();
+  const prediction = model.predict(input);
+  const scores = prediction.dataSync();
 
   let digit = scores.indexOf(Math.max(...scores));
   let confidence = Math.max(...scores);
 
   input.dispose();
-  pred.dispose();
+  prediction.dispose();
 
-  output.textContent = confidence > 0.6 ? digit : "Not clear";
+  output.textContent =
+    confidence > 0.6 ? digit : "Not clear";
 };
 
-/* =============================
+/* =========================
    INIT
-============================= */
+========================= */
 (async () => {
   await startCamera();
   await loadModel();

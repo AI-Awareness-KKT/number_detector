@@ -5,15 +5,14 @@
   <title>Number Detector</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- TensorFlow.js -->
+  <!-- TensorFlow.js ONLY -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.8.0/dist/tf.min.js"></script>
 
-  <!-- Styles -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- LOGO BANNER -->
+  <!-- LOGO -->
   <header class="top-banner">
     <img src="assets/logo.jpg" alt="Logo">
   </header>
@@ -23,22 +22,21 @@
     <h1>Number Detector</h1>
   </section>
 
-  <!-- GAME -->
+  <!-- APP -->
   <main class="container">
     <video id="video" autoplay playsinline></video>
 
-    <!-- hidden canvas for processing -->
+    <!-- Hidden canvas -->
     <canvas id="canvas" style="display:none;"></canvas>
 
     <button id="detectBtn">Detect Number</button>
 
     <div class="result">
       Detected Number:
-      <span id="output">Ready</span>
+      <span id="output">Loading model...</span>
     </div>
   </main>
 
-  <!-- App logic -->
   <script src="js/app.js"></script>
 </body>
 </html>
