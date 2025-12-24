@@ -1,0 +1,98 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  background: #eef3f9;
+  color: #222;
+}
+
+/* FULL WIDTH LOGO BANNER */
+.top-banner {
+  width: 100%;
+  background: linear-gradient(90deg, #003366, #005fa3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.top-banner img {
+  max-width: 100%;
+  height: 70px;
+  object-fit: contain;
+}
+
+/* TITLE BELOW LOGO */
+.page-title {
+  text-align: center;
+  padding: 18px 10px;
+}
+
+.page-title h1 {
+  font-size: 26px;
+  color: #003366;
+  font-weight: 600;
+}
+
+/* MAIN CONTAINER */
+.container {
+  max-width: 900px;
+  margin: 10px auto 30px;
+  padding: 20px;
+  text-align: center;
+}
+
+video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: 12px;
+  border: 3px solid #003366;
+  background: #000;
+}
+
+/* BUTTON */
+button {
+  margin-top: 20px;
+  padding: 12px 28px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background-color: #003366;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #005fa3;
+}
+
+/* RESULT */
+.result {
+  margin-top: 25px;
+  font-size: 22px;
+}
+
+#output {
+  font-weight: bold;
+  color: #003366;
+}
+
+/* HIDE CANVAS */
+canvas {
+  display: none;
+}
+
+/* MOBILE OPTIMIZATION */
+@media (max-width: 600px) {
+  .top-banner img {
+    height: 55px;
+  }
+
+  .page-title h1 {
+    font-size: 20px;
+  }
+}

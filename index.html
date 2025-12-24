@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Number Detector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+  <!-- FULL WIDTH LOGO BANNER -->
+  <header class="top-banner">
+    <img src="assets/logo.jpg" alt="Logo">
+  </header>
+
+  <!-- PAGE TITLE BELOW LOGO -->
+  <section class="page-title">
+    <h1>Number Detector</h1>
+  </section>
+
+  <!-- MAIN GAME AREA -->
+  <main class="container">
+    <video id="video" autoplay playsinline></video>
+
+    <canvas id="canvas"></canvas>
+
+    <button id="detectBtn">Detect Number</button>
+
+    <div class="result">
+      Detected Number:
+      <span id="output">—</span>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
