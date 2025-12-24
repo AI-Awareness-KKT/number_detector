@@ -1,77 +1,101 @@
-// app.js — High-accuracy single-digit webcam detector (TensorFlow.js CNN, MNIST)
+// app.js — MNIST CNN with 9-safe preprocessing
 
-const MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json"; 
-// This is a known good TFJS MNIST model hosted by Google
+const MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json";
 
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const detectBtn = document.getElementById("detectBtn");
+
 let model;
 
-// Start camera
+/* CAMERA */
 async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-    video.srcObject = stream;
-    await video.play();
-  } catch (err) {
-    alert("Camera access is required.");
-  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: "environment",
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    },
+    audio: false
+  });
+  video.srcObject = stream;
+  await video.play();
 }
 
-// Load TFJS model
+/* LOAD MODEL */
 async function loadModel() {
-  output.textContent = "Loading model...";
+  output.textContent = "Loading model…";
   model = await tf.loadLayersModel(MODEL_URL);
-  output.textContent = "Model loaded!";
+  model.predict(tf.zeros([1, 28, 28, 1]));
+  output.textContent = "Ready";
 }
 
-// Preprocess webcam frame
+/* PREPROCESS (9-SAFE) */
 function preprocess() {
-  const size = 28;
   const ctx = canvas.getContext("2d");
-  
-  // Crop a centered square region
-  const cropSize = Math.min(video.videoWidth, video.videoHeight);
-  const sx = (video.videoWidth - cropSize) / 2;
-  const sy = (video.videoHeight - cropSize) / 2;
 
-  canvas.width = size;
-  canvas.height = size;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const size = Math.min(vw, vh) * 0.65;
 
-  // Draw and scale
-  ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, size, size);
+  const sx = (vw - size) / 2;
+  const sy = (vh - size) / 2;
 
-  // Get image data
-  const imgData = ctx.getImageData(0, 0, size, size);
-  let data = [];
+  canvas.width = 28;
+  canvas.height = 28;
 
-  for (let i = 0; i < imgData.data.length; i += 4) {
-    const r = imgData.data[i];
-    const g = imgData.data[i + 1];
-    const b = imgData.data[i + 2];
-    const avg = (r + g + b) / 3;
-    data.push((255 - avg) / 255);
+  ctx.drawImage(video, sx, sy, size, size, 0, 0, 28, 28);
+
+  const img = ctx.getImageData(0, 0, 28, 28);
+  const data = img.data;
+  const arr = new Float32Array(28 * 28);
+
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+
+    // adaptive threshold keeps 9 tail visible
+    let val = gray < 160 ? 255 : 0;
+
+    // invert for MNIST
+    val = 255 - val;
+
+    arr[j] = val / 255;
   }
 
-  return tf.tensor4d(data, [1, size, size, 1]);
+  return tf.tensor4d(arr, [1, 28, 28, 1]);
 }
 
-// Detect button
+/* DETECT */
 detectBtn.addEventListener("click", async () => {
-  if (!model) return;
+  output.textContent = "Detecting… hold steady";
 
-  output.textContent = "Detecting...";
-  const inputTensor = preprocess();
-  const prediction = model.predict(inputTensor);
-  const scores = prediction.dataSync();
-  const best = scores.indexOf(Math.max(...scores));
+  const input = preprocess();
+  const preds = model.predict(input);
+  const scores = preds.dataSync();
 
-  output.textContent = best.toString();
+  let best = 0;
+  let bestScore = scores[0];
+  for (let i = 1; i < scores.length; i++) {
+    if (scores[i] > bestScore) {
+      bestScore = scores[i];
+      best = i;
+    }
+  }
+
+  input.dispose();
+  preds.dispose();
+
+  // Confidence guard (important for 9)
+  if (bestScore < 0.55) {
+    output.textContent = "Not clear";
+  } else {
+    output.textContent = `${best}`;
+  }
 });
-  
-(async function init() {
+
+/* INIT */
+(async () => {
   await startCamera();
   await loadModel();
 })();
