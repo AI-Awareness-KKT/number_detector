@@ -1,98 +1,109 @@
-let video = document.getElementById("video");
-let canvas = document.getElementById("canvas");
-let output = document.getElementById("output");
-let detectBtn = document.getElementById("detectBtn");
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const output = document.getElementById("output");
+const detectBtn = document.getElementById("detectBtn");
 
 let model;
 
-// Load MNIST model
-async function loadModel() {
-  model = await tf.loadLayersModel(
-    "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json"
-  );
-  model.predict(tf.zeros([1, 28, 28, 1]));
-}
-
-// Start camera
+/* =============================
+   START CAMERA
+============================= */
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" },
+    video: {
+      facingMode: "environment",
+      width: { ideal: 640 },
+      height: { ideal: 480 }
+    },
     audio: false
   });
   video.srcObject = stream;
   await video.play();
 }
 
-// Main detection
-detectBtn.onclick = async () => {
-  output.textContent = "Detecting...";
+/* =============================
+   LOAD MODEL
+============================= */
+async function loadModel() {
+  output.textContent = "Loading model...";
+  model = await tf.loadLayersModel(
+    "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json"
+  );
+  model.predict(tf.zeros([1, 28, 28, 1])); // warmup
+  output.textContent = "Ready";
+}
 
-  // Draw frame
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+/* =============================
+   PREPROCESS FRAME
+============================= */
+function preprocessFrame() {
+  const size = 28;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0);
 
-  // OpenCV processing
-  let src = cv.imread(canvas);
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
 
-  let blur = new cv.Mat();
-  cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+  // center crop
+  const crop = Math.min(vw, vh) * 0.6;
+  const sx = (vw - crop) / 2;
+  const sy = (vh - crop) / 2;
 
-  let edges = new cv.Mat();
-  cv.Canny(blur, edges, 50, 150);
+  canvas.width = size;
+  canvas.height = size;
 
-  let contours = new cv.MatVector();
-  let hierarchy = new cv.Mat();
-  cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  ctx.drawImage(video, sx, sy, crop, crop, 0, 0, size, size);
 
-  // Find largest contour
-  let maxContour = null;
-  let maxArea = 0;
-  for (let i = 0; i < contours.size(); i++) {
-    let cnt = contours.get(i);
-    let area = cv.contourArea(cnt);
-    if (area > maxArea) {
-      maxArea = area;
-      maxContour = cnt;
-    }
+  const img = ctx.getImageData(0, 0, size, size);
+  const data = img.data;
+  const arr = new Float32Array(size * size);
+
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+
+    // invert + normalize
+    arr[j] = (255 - gray) / 255;
   }
 
-  if (!maxContour) {
-    output.textContent = "No digit found";
+  return tf.tensor4d(arr, [1, size, size, 1]);
+}
+
+/* =============================
+   DETECT DIGIT
+============================= */
+detectBtn.addEventListener("click", async () => {
+  if (!model) {
+    output.textContent = "Model not ready";
     return;
   }
 
-  // Crop bounding box
-  let rect = cv.boundingRect(maxContour);
-  let roi = gray.roi(rect);
+  output.textContent = "Detecting...";
 
-  // Resize to 28x28
-  let resized = new cv.Mat();
-  cv.resize(roi, resized, new cv.Size(28, 28));
+  const input = preprocessFrame();
+  const pred = model.predict(input);
+  const scores = pred.dataSync();
 
-  // Convert to tensor
-  let imgData = resized.data;
-  let input = [];
-  for (let i = 0; i < imgData.length; i++) {
-    input.push((255 - imgData[i]) / 255);
+  let digit = 0;
+  let best = scores[0];
+  for (let i = 1; i < scores.length; i++) {
+    if (scores[i] > best) {
+      best = scores[i];
+      digit = i;
+    }
   }
 
-  let tensor = tf.tensor4d(input, [1, 28, 28, 1]);
-  let pred = model.predict(tensor);
-  let digit = pred.argMax(-1).dataSync()[0];
+  input.dispose();
+  pred.dispose();
 
-  output.textContent = digit.toString();
+  if (best < 0.6) {
+    output.textContent = "Not clear";
+  } else {
+    output.textContent = digit.toString();
+  }
+});
 
-  // Cleanup
-  src.delete(); gray.delete(); blur.delete(); edges.delete();
-  contours.delete(); hierarchy.delete(); roi.delete(); resized.delete();
-  tensor.dispose(); pred.dispose();
-};
-
-// Init
+/* =============================
+   INIT
+============================= */
 (async () => {
   await startCamera();
   await loadModel();

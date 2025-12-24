@@ -5,43 +5,40 @@
   <title>Number Detector</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- TensorFlow.js (REQUIRED for digit detection) -->
+  <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.8.0/dist/tf.min.js"></script>
 
-  <!-- Main Styles -->
+  <!-- Styles -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- FULL WIDTH LOGO BANNER -->
+  <!-- LOGO BANNER -->
   <header class="top-banner">
     <img src="assets/logo.jpg" alt="Logo">
   </header>
 
-  <!-- PAGE TITLE BELOW LOGO -->
+  <!-- TITLE -->
   <section class="page-title">
     <h1>Number Detector</h1>
   </section>
 
-  <!-- MAIN GAME AREA -->
+  <!-- GAME -->
   <main class="container">
-    <!-- Live Camera Feed -->
     <video id="video" autoplay playsinline></video>
 
-    <!-- Hidden canvas used for image preprocessing -->
+    <!-- hidden canvas for processing -->
     <canvas id="canvas" style="display:none;"></canvas>
 
-    <!-- Action Button -->
     <button id="detectBtn">Detect Number</button>
 
-    <!-- Result -->
     <div class="result">
       Detected Number:
-      <span id="output">—</span>
+      <span id="output">Ready</span>
     </div>
   </main>
 
-  <!-- Game Logic -->
+  <!-- App logic -->
   <script src="js/app.js"></script>
 </body>
 </html>
