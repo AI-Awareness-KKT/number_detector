@@ -24,9 +24,11 @@
     <canvas id="canvas" width="240" height="240"></canvas>
 
     <div class="controls">
-      <button onclick="switchCamera()">Switch Camera</button>
-      <button onclick="detectNumber()">Detect Number</button>
+  <select id="cameraSelect"></select>
+  <button onclick="startSelectedCamera()">Start Camera</button>
+  <button onclick="detectNumber()">Detect Number</button>
     </div>
+
 
     <div class="result">
       Detected Number: <span id="output">—</span>
