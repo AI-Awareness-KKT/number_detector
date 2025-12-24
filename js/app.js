@@ -1,100 +1,98 @@
-// app.js — MNIST CNN with 9-safe preprocessing
-
-const MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json";
-
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const output = document.getElementById("output");
-const detectBtn = document.getElementById("detectBtn");
+let video = document.getElementById("video");
+let canvas = document.getElementById("canvas");
+let output = document.getElementById("output");
+let detectBtn = document.getElementById("detectBtn");
 
 let model;
 
-/* CAMERA */
+// Load MNIST model
+async function loadModel() {
+  model = await tf.loadLayersModel(
+    "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json"
+  );
+  model.predict(tf.zeros([1, 28, 28, 1]));
+}
+
+// Start camera
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: "environment",
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    },
+    video: { facingMode: "environment" },
     audio: false
   });
   video.srcObject = stream;
   await video.play();
 }
 
-/* LOAD MODEL */
-async function loadModel() {
-  output.textContent = "Loading model…";
-  model = await tf.loadLayersModel(MODEL_URL);
-  model.predict(tf.zeros([1, 28, 28, 1]));
-  output.textContent = "Ready";
-}
+// Main detection
+detectBtn.onclick = async () => {
+  output.textContent = "Detecting...";
 
-/* PREPROCESS (9-SAFE) */
-function preprocess() {
+  // Draw frame
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
 
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const size = Math.min(vw, vh) * 0.65;
+  // OpenCV processing
+  let src = cv.imread(canvas);
+  let gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-  const sx = (vw - size) / 2;
-  const sy = (vh - size) / 2;
+  let blur = new cv.Mat();
+  cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
 
-  canvas.width = 28;
-  canvas.height = 28;
+  let edges = new cv.Mat();
+  cv.Canny(blur, edges, 50, 150);
 
-  ctx.drawImage(video, sx, sy, size, size, 0, 0, 28, 28);
+  let contours = new cv.MatVector();
+  let hierarchy = new cv.Mat();
+  cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-  const img = ctx.getImageData(0, 0, 28, 28);
-  const data = img.data;
-  const arr = new Float32Array(28 * 28);
-
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-
-    // adaptive threshold keeps 9 tail visible
-    let val = gray < 160 ? 255 : 0;
-
-    // invert for MNIST
-    val = 255 - val;
-
-    arr[j] = val / 255;
-  }
-
-  return tf.tensor4d(arr, [1, 28, 28, 1]);
-}
-
-/* DETECT */
-detectBtn.addEventListener("click", async () => {
-  output.textContent = "Detecting… hold steady";
-
-  const input = preprocess();
-  const preds = model.predict(input);
-  const scores = preds.dataSync();
-
-  let best = 0;
-  let bestScore = scores[0];
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > bestScore) {
-      bestScore = scores[i];
-      best = i;
+  // Find largest contour
+  let maxContour = null;
+  let maxArea = 0;
+  for (let i = 0; i < contours.size(); i++) {
+    let cnt = contours.get(i);
+    let area = cv.contourArea(cnt);
+    if (area > maxArea) {
+      maxArea = area;
+      maxContour = cnt;
     }
   }
 
-  input.dispose();
-  preds.dispose();
-
-  // Confidence guard (important for 9)
-  if (bestScore < 0.55) {
-    output.textContent = "Not clear";
-  } else {
-    output.textContent = `${best}`;
+  if (!maxContour) {
+    output.textContent = "No digit found";
+    return;
   }
-});
 
-/* INIT */
+  // Crop bounding box
+  let rect = cv.boundingRect(maxContour);
+  let roi = gray.roi(rect);
+
+  // Resize to 28x28
+  let resized = new cv.Mat();
+  cv.resize(roi, resized, new cv.Size(28, 28));
+
+  // Convert to tensor
+  let imgData = resized.data;
+  let input = [];
+  for (let i = 0; i < imgData.length; i++) {
+    input.push((255 - imgData[i]) / 255);
+  }
+
+  let tensor = tf.tensor4d(input, [1, 28, 28, 1]);
+  let pred = model.predict(tensor);
+  let digit = pred.argMax(-1).dataSync()[0];
+
+  output.textContent = digit.toString();
+
+  // Cleanup
+  src.delete(); gray.delete(); blur.delete(); edges.delete();
+  contours.delete(); hierarchy.delete(); roi.delete(); resized.delete();
+  tensor.dispose(); pred.dispose();
+};
+
+// Init
 (async () => {
   await startCamera();
   await loadModel();
