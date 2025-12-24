@@ -1,14 +1,10 @@
-// app.js — Accurate MNIST-style digit detection
-
-const MODEL_URL =
-  "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json";
+// app.js — Model-free handwritten digit detection
+// Works on GitHub Pages (no TensorFlow, no OpenCV)
 
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const detectBtn = document.getElementById("detectBtn");
-
-let model;
 
 /* ================= CAMERA ================= */
 async function startCamera() {
@@ -24,21 +20,12 @@ async function startCamera() {
   await video.play();
 }
 
-/* ================= MODEL ================= */
-async function loadModel() {
-  output.textContent = "Loading model…";
-  model = await tf.loadLayersModel(MODEL_URL);
-  model.predict(tf.zeros([1, 28, 28, 1]));
-  output.textContent = "Ready";
-}
-
-/* ================= PREPROCESS ================= */
+/* ================= IMAGE PROCESS ================= */
 function preprocess() {
   const ctx = canvas.getContext("2d");
   const vw = video.videoWidth;
   const vh = video.videoHeight;
 
-  // Step 1: Crop center square
   const size = Math.min(vw, vh) * 0.6;
   const sx = (vw - size) / 2;
   const sy = (vh - size) / 2;
@@ -47,92 +34,92 @@ function preprocess() {
   canvas.height = size;
   ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
 
-  // Step 2: Convert to grayscale + adaptive threshold
   const img = ctx.getImageData(0, 0, size, size);
   const data = img.data;
 
+  let blackPixels = [];
   let minX = size, minY = size, maxX = 0, maxY = 0;
 
   for (let i = 0; i < data.length; i += 4) {
     const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-    const v = gray < 170 ? 0 : 255;
+    const isBlack = gray < 160;
 
-    data[i] = data[i + 1] = data[i + 2] = v;
-
-    if (v === 0) {
-      const px = (i / 4) % size;
-      const py = Math.floor(i / 4 / size);
-      minX = Math.min(minX, px);
-      minY = Math.min(minY, py);
-      maxX = Math.max(maxX, px);
-      maxY = Math.max(maxY, py);
+    if (isBlack) {
+      const x = (i / 4) % size;
+      const y = Math.floor(i / 4 / size);
+      blackPixels.push({ x, y });
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
     }
   }
 
-  // Step 3: Bounding box
-  const bw = maxX - minX;
-  const bh = maxY - minY;
+  if (blackPixels.length < 200) return null;
 
-  if (bw < 20 || bh < 20) return null;
+  return {
+    pixels: blackPixels,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
 
-  // Step 4: Resize to 28×28
-  const digit = document.createElement("canvas");
-  digit.width = 28;
-  digit.height = 28;
+/* ================= FEATURE EXTRACTION ================= */
+function extractFeatures(pixels, w, h) {
+  let vertical = 0;
+  let horizontal = 0;
+  let center = 0;
 
-  const dctx = digit.getContext("2d");
-  dctx.fillStyle = "black";
-  dctx.fillRect(0, 0, 28, 28);
-  dctx.drawImage(
-    canvas,
-    minX,
-    minY,
-    bw,
-    bh,
-    4,
-    4,
-    20,
-    20
-  );
+  pixels.forEach(p => {
+    if (p.x > w * 0.4 && p.x < w * 0.6) vertical++;
+    if (p.y > h * 0.4 && p.y < h * 0.6) horizontal++;
+    if (
+      p.x > w * 0.3 && p.x < w * 0.7 &&
+      p.y > h * 0.3 && p.y < h * 0.7
+    ) center++;
+  });
 
-  const dimg = dctx.getImageData(0, 0, 28, 28);
-  const arr = new Float32Array(28 * 28);
+  return {
+    density: pixels.length,
+    vertical,
+    horizontal,
+    center,
+    aspect: h / w
+  };
+}
 
-  for (let i = 0, j = 0; i < dimg.data.length; i += 4, j++) {
-    arr[j] = (255 - dimg.data[i]) / 255;
-  }
+/* ================= DIGIT LOGIC ================= */
+function classify(f) {
+  if (f.aspect > 2.2 && f.vertical > f.horizontal * 3) return "1";
+  if (f.center > f.density * 0.3) return "0";
+  if (f.horizontal > f.vertical && f.aspect < 1.2) return "7";
+  if (f.center > f.density * 0.2 && f.aspect < 1.5) return "8";
+  if (f.aspect > 1.4 && f.vertical > f.horizontal) return "9";
+  if (f.aspect < 1.1 && f.center < f.density * 0.15) return "2";
+  if (f.center > f.density * 0.15) return "6";
+  if (f.vertical > f.horizontal * 1.2) return "4";
 
-  return tf.tensor4d(arr, [1, 28, 28, 1]);
+  return "Not clear";
 }
 
 /* ================= DETECT ================= */
-detectBtn.addEventListener("click", async () => {
-  output.textContent = "Detecting… keep still";
+detectBtn.addEventListener("click", () => {
+  output.textContent = "Detecting…";
 
-  const input = preprocess();
-  if (!input) {
+  const data = preprocess();
+  if (!data) {
     output.textContent = "Show number clearly";
     return;
   }
 
-  const preds = model.predict(input);
-  const scores = preds.dataSync();
+  const features = extractFeatures(
+    data.pixels,
+    data.width,
+    data.height
+  );
 
-  let digit = scores.indexOf(Math.max(...scores));
-  let confidence = Math.max(...scores);
-
-  input.dispose();
-  preds.dispose();
-
-  if (confidence < 0.6) {
-    output.textContent = "Not clear";
-  } else {
-    output.textContent = `${digit}`;
-  }
+  output.textContent = classify(features);
 });
 
 /* ================= INIT ================= */
-(async () => {
-  await startCamera();
-  await loadModel();
-})();
+startCamera();
