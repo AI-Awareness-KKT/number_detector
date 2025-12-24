@@ -3,18 +3,15 @@ const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const detectBtn = document.getElementById("detectBtn");
 
+let modelLoaded = false;
 let model;
 
 /* =============================
-   START CAMERA
+   CAMERA
 ============================= */
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: "environment",
-      width: { ideal: 640 },
-      height: { ideal: 480 }
-    },
+    video: { facingMode: "environment" },
     audio: false
   });
   video.srcObject = stream;
@@ -22,29 +19,37 @@ async function startCamera() {
 }
 
 /* =============================
-   LOAD MODEL
+   LOAD MODEL (GITHUB HOSTED)
 ============================= */
 async function loadModel() {
-  output.textContent = "Loading model...";
-  model = await tf.loadLayersModel(
-    "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json"
-  );
-  model.predict(tf.zeros([1, 28, 28, 1])); // warmup
-  output.textContent = "Ready";
+  try {
+    output.textContent = "Loading model...";
+
+    model = await tf.loadLayersModel(
+      "https://hpssjellis.github.io/beginner-tensorflowjs-examples-in-javascript/saved-models/mnist/convnet/model.json"
+    );
+
+    // warm up
+    model.predict(tf.zeros([1, 28, 28, 1]));
+    modelLoaded = true;
+    output.textContent = "Ready";
+  } catch (err) {
+    console.error(err);
+    output.textContent = "Model failed to load";
+  }
 }
 
 /* =============================
-   PREPROCESS FRAME
+   PREPROCESS
 ============================= */
-function preprocessFrame() {
+function preprocess() {
   const size = 28;
   const ctx = canvas.getContext("2d");
 
   const vw = video.videoWidth;
   const vh = video.videoHeight;
-
-  // center crop
   const crop = Math.min(vw, vh) * 0.6;
+
   const sx = (vw - crop) / 2;
   const sy = (vh - crop) / 2;
 
@@ -53,14 +58,11 @@ function preprocessFrame() {
 
   ctx.drawImage(video, sx, sy, crop, crop, 0, 0, size, size);
 
-  const img = ctx.getImageData(0, 0, size, size);
-  const data = img.data;
+  const img = ctx.getImageData(0, 0, size, size).data;
   const arr = new Float32Array(size * size);
 
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-
-    // invert + normalize
+  for (let i = 0, j = 0; i < img.length; i += 4, j++) {
+    const gray = (img[i] + img[i + 1] + img[i + 2]) / 3;
     arr[j] = (255 - gray) / 255;
   }
 
@@ -68,38 +70,28 @@ function preprocessFrame() {
 }
 
 /* =============================
-   DETECT DIGIT
+   DETECT
 ============================= */
-detectBtn.addEventListener("click", async () => {
-  if (!model) {
+detectBtn.onclick = async () => {
+  if (!modelLoaded) {
     output.textContent = "Model not ready";
     return;
   }
 
   output.textContent = "Detecting...";
 
-  const input = preprocessFrame();
+  const input = preprocess();
   const pred = model.predict(input);
   const scores = pred.dataSync();
 
-  let digit = 0;
-  let best = scores[0];
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > best) {
-      best = scores[i];
-      digit = i;
-    }
-  }
+  let digit = scores.indexOf(Math.max(...scores));
+  let confidence = Math.max(...scores);
 
   input.dispose();
   pred.dispose();
 
-  if (best < 0.6) {
-    output.textContent = "Not clear";
-  } else {
-    output.textContent = digit.toString();
-  }
-});
+  output.textContent = confidence > 0.6 ? digit : "Not clear";
+};
 
 /* =============================
    INIT
