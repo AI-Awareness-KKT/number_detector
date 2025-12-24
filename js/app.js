@@ -1,12 +1,15 @@
-// app.js — Model-free handwritten digit detection
-// Works on GitHub Pages (no TensorFlow, no OpenCV)
+// app.js — MNIST CNN with 9-safe preprocessing
+
+const MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json";
 
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const detectBtn = document.getElementById("detectBtn");
 
-/* ================= CAMERA ================= */
+let model;
+
+/* CAMERA */
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
@@ -20,106 +23,79 @@ async function startCamera() {
   await video.play();
 }
 
-/* ================= IMAGE PROCESS ================= */
+/* LOAD MODEL */
+async function loadModel() {
+  output.textContent = "Loading model…";
+  model = await tf.loadLayersModel(MODEL_URL);
+  model.predict(tf.zeros([1, 28, 28, 1]));
+  output.textContent = "Ready";
+}
+
+/* PREPROCESS (9-SAFE) */
 function preprocess() {
   const ctx = canvas.getContext("2d");
+
   const vw = video.videoWidth;
   const vh = video.videoHeight;
+  const size = Math.min(vw, vh) * 0.65;
 
-  const size = Math.min(vw, vh) * 0.6;
   const sx = (vw - size) / 2;
   const sy = (vh - size) / 2;
 
-  canvas.width = size;
-  canvas.height = size;
-  ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+  canvas.width = 28;
+  canvas.height = 28;
 
-  const img = ctx.getImageData(0, 0, size, size);
+  ctx.drawImage(video, sx, sy, size, size, 0, 0, 28, 28);
+
+  const img = ctx.getImageData(0, 0, 28, 28);
   const data = img.data;
+  const arr = new Float32Array(28 * 28);
 
-  let blackPixels = [];
-  let minX = size, minY = size, maxX = 0, maxY = 0;
-
-  for (let i = 0; i < data.length; i += 4) {
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
     const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-    const isBlack = gray < 160;
 
-    if (isBlack) {
-      const x = (i / 4) % size;
-      const y = Math.floor(i / 4 / size);
-      blackPixels.push({ x, y });
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+    // adaptive threshold keeps 9 tail visible
+    let val = gray < 160 ? 255 : 0;
+
+    // invert for MNIST
+    val = 255 - val;
+
+    arr[j] = val / 255;
+  }
+
+  return tf.tensor4d(arr, [1, 28, 28, 1]);
+}
+
+/* DETECT */
+detectBtn.addEventListener("click", async () => {
+  output.textContent = "Detecting… hold steady";
+
+  const input = preprocess();
+  const preds = model.predict(input);
+  const scores = preds.dataSync();
+
+  let best = 0;
+  let bestScore = scores[0];
+  for (let i = 1; i < scores.length; i++) {
+    if (scores[i] > bestScore) {
+      bestScore = scores[i];
+      best = i;
     }
   }
 
-  if (blackPixels.length < 200) return null;
+  input.dispose();
+  preds.dispose();
 
-  return {
-    pixels: blackPixels,
-    width: maxX - minX,
-    height: maxY - minY
-  };
-}
-
-/* ================= FEATURE EXTRACTION ================= */
-function extractFeatures(pixels, w, h) {
-  let vertical = 0;
-  let horizontal = 0;
-  let center = 0;
-
-  pixels.forEach(p => {
-    if (p.x > w * 0.4 && p.x < w * 0.6) vertical++;
-    if (p.y > h * 0.4 && p.y < h * 0.6) horizontal++;
-    if (
-      p.x > w * 0.3 && p.x < w * 0.7 &&
-      p.y > h * 0.3 && p.y < h * 0.7
-    ) center++;
-  });
-
-  return {
-    density: pixels.length,
-    vertical,
-    horizontal,
-    center,
-    aspect: h / w
-  };
-}
-
-/* ================= DIGIT LOGIC ================= */
-function classify(f) {
-  if (f.aspect > 2.2 && f.vertical > f.horizontal * 3) return "1";
-  if (f.center > f.density * 0.3) return "0";
-  if (f.horizontal > f.vertical && f.aspect < 1.2) return "7";
-  if (f.center > f.density * 0.2 && f.aspect < 1.5) return "8";
-  if (f.aspect > 1.4 && f.vertical > f.horizontal) return "9";
-  if (f.aspect < 1.1 && f.center < f.density * 0.15) return "2";
-  if (f.center > f.density * 0.15) return "6";
-  if (f.vertical > f.horizontal * 1.2) return "4";
-
-  return "Not clear";
-}
-
-/* ================= DETECT ================= */
-detectBtn.addEventListener("click", () => {
-  output.textContent = "Detecting…";
-
-  const data = preprocess();
-  if (!data) {
-    output.textContent = "Show number clearly";
-    return;
+  // Confidence guard (important for 9)
+  if (bestScore < 0.55) {
+    output.textContent = "Not clear";
+  } else {
+    output.textContent = `${best}`;
   }
-
-  const features = extractFeatures(
-    data.pixels,
-    data.width,
-    data.height
-  );
-
-  output.textContent = classify(features);
 });
 
-/* ================= INIT ================= */
-startCamera();
+/* INIT */
+(async () => {
+  await startCamera();
+  await loadModel();
+})();
