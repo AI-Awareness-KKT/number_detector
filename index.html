@@ -2,13 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Number Detector</title>
+  <title>Number Detection Game</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- TensorFlow.js (REQUIRED for digit detection) -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.8.0/dist/tf.min.js"></script>
-
-  <!-- Main Styles -->
+  <!-- LINK CSS (IMPORTANT) -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -20,28 +17,24 @@
 
   <!-- PAGE TITLE BELOW LOGO -->
   <section class="page-title">
-    <h1>Number Detector</h1>
+    <h1>Number Detection Game</h1>
   </section>
 
   <!-- MAIN GAME AREA -->
   <main class="container">
-    <!-- Live Camera Feed -->
     <video id="video" autoplay playsinline></video>
 
-    <!-- Hidden canvas used for image preprocessing -->
-    <canvas id="canvas" style="display:none;"></canvas>
+    <!-- hidden canvas -->
+    <canvas id="canvas" width="200" height="200"></canvas>
 
-    <!-- Action Button -->
-    <button id="detectBtn">Detect Number</button>
+    <button onclick="detectNumber()">Detect Number</button>
 
-    <!-- Result -->
     <div class="result">
-      Detected Number:
-      <span id="output">—</span>
+      Detected Number: <span id="output">—</span>
     </div>
   </main>
 
-  <!-- Game Logic -->
+  <!-- APP LOGIC -->
   <script src="js/app.js"></script>
 </body>
 </html>

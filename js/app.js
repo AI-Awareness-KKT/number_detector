@@ -1,101 +1,78 @@
-// app.js — MNIST CNN with 9-safe preprocessing
-
-const MODEL_URL = "https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json";
-
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
 const output = document.getElementById("output");
-const detectBtn = document.getElementById("detectBtn");
 
-let model;
+/* ==========================
+   CAMERA START
+========================== */
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => video.srcObject = stream)
+  .catch(() => alert("Camera access denied"));
 
-/* CAMERA */
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: "environment",
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    },
-    audio: false
-  });
-  video.srcObject = stream;
-  await video.play();
-}
+/* ==========================
+   MAIN DETECTION FUNCTION
+========================== */
+function detectNumber() {
+  // Capture frame
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-/* LOAD MODEL */
-async function loadModel() {
-  output.textContent = "Loading model…";
-  model = await tf.loadLayersModel(MODEL_URL);
-  model.predict(tf.zeros([1, 28, 28, 1]));
-  output.textContent = "Ready";
-}
-
-/* PREPROCESS (9-SAFE) */
-function preprocess() {
-  const ctx = canvas.getContext("2d");
-
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const size = Math.min(vw, vh) * 0.65;
-
-  const sx = (vw - size) / 2;
-  const sy = (vh - size) / 2;
-
-  canvas.width = 28;
-  canvas.height = 28;
-
-  ctx.drawImage(video, sx, sy, size, size, 0, 0, 28, 28);
-
-  const img = ctx.getImageData(0, 0, 28, 28);
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = img.data;
-  const arr = new Float32Array(28 * 28);
 
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-
-    // adaptive threshold keeps 9 tail visible
-    let val = gray < 160 ? 255 : 0;
-
-    // invert for MNIST
-    val = 255 - val;
-
-    arr[j] = val / 255;
+  // Convert to black & white (thresholding)
+  for (let i = 0; i < data.length; i += 4) {
+    const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+    const val = avg < 160 ? 0 : 255;
+    data[i] = data[i+1] = data[i+2] = val;
   }
+  ctx.putImageData(img, 0, 0);
 
-  return tf.tensor4d(arr, [1, 28, 28, 1]);
+  // Extract digit pattern
+  const digit = recognizeDigit(img.data);
+  output.textContent = digit ?? "Not clear";
 }
 
-/* DETECT */
-detectBtn.addEventListener("click", async () => {
-  output.textContent = "Detecting… hold steady";
+/* ==========================
+   DIGIT RECOGNITION LOGIC
+========================== */
+function recognizeDigit(data) {
 
-  const input = preprocess();
-  const preds = model.predict(input);
-  const scores = preds.dataSync();
+  const zones = [
+    zone(70, 10, 130, 40),    // top
+    zone(140, 40, 170, 90),  // top-right
+    zone(140, 110, 170, 160),// bottom-right
+    zone(70, 160, 130, 190), // bottom
+    zone(30, 110, 60, 160),  // bottom-left
+    zone(30, 40, 60, 90),    // top-left
+    zone(70, 90, 130, 120)   // middle
+  ];
 
-  let best = 0;
-  let bestScore = scores[0];
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] > bestScore) {
-      bestScore = scores[i];
-      best = i;
+  function zone(x1, y1, x2, y2) {
+    let count = 0;
+    for (let y = y1; y < y2; y++) {
+      for (let x = x1; x < x2; x++) {
+        const i = (y * canvas.width + x) * 4;
+        if (data[i] === 0) count++;
+      }
     }
+    return count > 120;
   }
 
-  input.dispose();
-  preds.dispose();
+  const key = zones.map(z => z ? 1 : 0).join("");
 
-  // Confidence guard (important for 9)
-  if (bestScore < 0.55) {
-    output.textContent = "Not clear";
-  } else {
-    output.textContent = `${best}`;
-  }
-});
+  const digits = {
+    "1111110": 0,
+    "0110000": 1,
+    "1101101": 2,
+    "1111001": 3,
+    "0110011": 4,
+    "1011011": 5,
+    "1011111": 6,
+    "1110000": 7,
+    "1111111": 8,
+    "1111011": 9
+  };
 
-/* INIT */
-(async () => {
-  await startCamera();
-  await loadModel();
-})();
+  return digits[key];
+}
