@@ -280,107 +280,107 @@ detectBtn.onclick = async () => {
 
   output.textContent = "Analyzing single digit...";
 
-  await waitForOpencv();
+  // Ensure OpenCV is ready
+  if (typeof cv === "undefined" || !cv.Mat) {
+    output.textContent = "OpenCV not ready. Reload page.";
+    return;
+  }
 
-  // Draw captured image
-  canvas.width = 800;
-  canvas.height = 800;
+  // Load image safely (no onload hang)
+  const img = await createImageBitmap(
+    await (await fetch(latestCaptureDataURL)).blob()
+  );
+
+  // Draw to canvas
+  canvas.width = img.width;
+  canvas.height = img.height;
   const ctx = canvas.getContext("2d");
-  const img = new Image();
-  img.src = latestCaptureDataURL;
+  ctx.drawImage(img, 0, 0);
 
-  img.onload = async () => {
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // ---- OpenCV processing (LIGHTWEIGHT) ----
+  let src = cv.imread(canvas);
+  let gray = new cv.Mat();
+  let thresh = new cv.Mat();
+  let contours = new cv.MatVector();
+  let hierarchy = new cv.Mat();
 
-    // --- OpenCV processing ---
-    let src = cv.imread(canvas);
-    let gray = new cv.Mat();
-    let thresh = new cv.Mat();
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.threshold(
+    gray,
+    thresh,
+    0,
+    255,
+    cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+  );
 
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.findContours(
+    thresh,
+    contours,
+    hierarchy,
+    cv.RETR_EXTERNAL,
+    cv.CHAIN_APPROX_SIMPLE
+  );
 
-    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+  if (contours.size() === 0) {
+    output.textContent = "No digit found";
+    cleanup();
+    return;
+  }
 
-    cv.threshold(
-      gray,
-      thresh,
-      0,
-      255,
-      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
-    );
-
-    cv.findContours(
-      thresh,
-      contours,
-      hierarchy,
-      cv.RETR_EXTERNAL,
-      cv.CHAIN_APPROX_SIMPLE
-    );
-
-    if (contours.size() === 0) {
-      output.textContent = "No digit found";
-      return;
+  // Find largest contour ONLY
+  let maxArea = 0;
+  let best = null;
+  for (let i = 0; i < contours.size(); i++) {
+    const c = contours.get(i);
+    const area = cv.contourArea(c);
+    if (area > maxArea) {
+      maxArea = area;
+      best = c;
     }
+  }
 
-    // --- Select ONLY the largest contour ---
-    let maxArea = 0;
-    let bestContour = null;
+  const rect = cv.boundingRect(best);
 
-    for (let i = 0; i < contours.size(); i++) {
-      const cnt = contours.get(i);
-      const area = cv.contourArea(cnt);
-      if (area > maxArea) {
-        maxArea = area;
-        bestContour = cnt;
-      }
+  // Reject noise
+  if (rect.width < 60 || rect.height < 60) {
+    output.textContent = "Digit too small";
+    cleanup();
+    return;
+  }
+
+  // Crop digit ROI
+  let roi = src.roi(rect);
+  let resized = new cv.Mat();
+  cv.resize(roi, resized, new cv.Size(300, 300));
+
+  // Convert ROI to canvas for OCR
+  const digitCanvas = document.createElement("canvas");
+  cv.imshow(digitCanvas, resized);
+
+  // ---- OCR (STRICT SINGLE DIGIT) ----
+  const result = await Tesseract.recognize(
+    digitCanvas,
+    "eng",
+    {
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
     }
+  );
 
-    const rect = cv.boundingRect(bestContour);
+  const digit = result.data.text.replace(/\D/g, "");
 
-    // Reject noise
-    if (rect.width < 80 || rect.height < 80) {
-      output.textContent = "Digit too small";
-      return;
-    }
+  output.textContent =
+    digit.length === 1 ? digit : "Retry (align digit)";
 
-    // Crop ONLY the digit
-    let digitROI = src.roi(rect);
+  cleanup();
 
-    // Resize for OCR
-    let resized = new cv.Mat();
-    cv.resize(digitROI, resized, new cv.Size(300, 300));
-
-    // Convert ROI to canvas
-    const digitCanvas = document.createElement("canvas");
-    cv.imshow(digitCanvas, resized);
-
-    // --- OCR ON CROPPED DIGIT ONLY ---
-    const result = await Tesseract.recognize(
-      digitCanvas,
-      "eng",
-      {
-        tessedit_char_whitelist: "0123456789",
-        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
-      }
-    );
-
-    const text = result.data.text.replace(/\D/g, "");
-
-    if (text.length === 1) {
-      output.textContent = text;
-    } else {
-      output.textContent = "Retry (align digit)";
-    }
-
-    // Cleanup
+  function cleanup() {
     src.delete();
     gray.delete();
     thresh.delete();
     contours.delete();
     hierarchy.delete();
-    digitROI.delete();
-    resized.delete();
-  };
+    if (roi) roi.delete();
+    if (resized) resized.delete();
+  }
 };
