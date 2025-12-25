@@ -274,69 +274,113 @@ async function ocrCanvasForDigit(canvasElement) {
 // Main detect button: produce variants, run OCR on each, vote
 detectBtn.onclick = async () => {
   if (!latestCaptureDataURL) {
-    output.textContent = "Capture an image first";
+    output.textContent = "Capture image first";
     return;
   }
-  output.textContent = "Processing image — this may take a few seconds...";
 
-  // Ensure OpenCV and Tesseract ready
+  output.textContent = "Analyzing single digit...";
+
   await waitForOpencv();
 
-  // Generate preprocessed canvases
-  const variants = await generatePreprocessedVariants(latestCaptureDataURL);
+  // Draw captured image
+  canvas.width = 800;
+  canvas.height = 800;
+  const ctx = canvas.getContext("2d");
+  const img = new Image();
+  img.src = latestCaptureDataURL;
 
-  if (!variants || variants.length === 0) {
-    output.textContent = "No usable image variant produced";
-    return;
-  }
+  img.onload = async () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-  // Try OCR on each variant and on a few augmented copies (slight blurs, resized)
-  const results = [];
-  for (let i = 0; i < variants.length; i++) {
-    const c = variants[i];
+    // --- OpenCV processing ---
+    let src = cv.imread(canvas);
+    let gray = new cv.Mat();
+    let thresh = new cv.Mat();
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
 
-    // apply OCR on original variant
-    const r1 = await ocrCanvasForDigit(c);
-    if (r1) results.push(r1);
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-    // try a slightly blurred copy as well
-    try {
-      const temp = document.createElement("canvas");
-      temp.width = c.width; temp.height = c.height;
-      const ctx = temp.getContext("2d");
-      ctx.drawImage(c, 0, 0);
-      // apply CSS blur via canvas (cheap) -> draw scaled down/up to simulate slight blur
-      const small = document.createElement("canvas");
-      small.width = Math.round(c.width * 0.9);
-      small.height = Math.round(c.height * 0.9);
-      small.getContext("2d").drawImage(c, 0, 0, small.width, small.height);
-      ctx.clearRect(0,0,temp.width,temp.height);
-      ctx.drawImage(small, 0, 0, temp.width, temp.height);
-      const r2 = await ocrCanvasForDigit(temp);
-      if (r2) results.push(r2);
-    } catch(e){ /* ignore */ }
-  }
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
 
-  // If nothing recognized yet, try raw capture with Otsu and adaptive quickly
-  if (results.length === 0) {
-    const fallbackCanvas = document.createElement("canvas");
-    await drawImageOnCanvas(latestCaptureDataURL, fallbackCanvas, 600, 600);
-    const r = await ocrCanvasForDigit(fallbackCanvas);
-    if (r) results.push(r);
-  }
+    cv.threshold(
+      gray,
+      thresh,
+      0,
+      255,
+      cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+    );
 
-  // Vote for most frequent digit
-  if (results.length === 0) {
-    output.textContent = "No digit detected. Try recapturing with clearer framing.";
-    return;
-  }
+    cv.findContours(
+      thresh,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE
+    );
 
-  const counts = {};
-  results.forEach(d => counts[d] = (counts[d]||0) + 1);
-  let best = null; let bestCount = 0;
-  for (const k in counts) {
-    if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
-  }
+    if (contours.size() === 0) {
+      output.textContent = "No digit found";
+      return;
+    }
 
-  output.textContent = best + "  (votes: " + bestCount + " / tries: " + results.length + ")";
+    // --- Select ONLY the largest contour ---
+    let maxArea = 0;
+    let bestContour = null;
+
+    for (let i = 0; i < contours.size(); i++) {
+      const cnt = contours.get(i);
+      const area = cv.contourArea(cnt);
+      if (area > maxArea) {
+        maxArea = area;
+        bestContour = cnt;
+      }
+    }
+
+    const rect = cv.boundingRect(bestContour);
+
+    // Reject noise
+    if (rect.width < 80 || rect.height < 80) {
+      output.textContent = "Digit too small";
+      return;
+    }
+
+    // Crop ONLY the digit
+    let digitROI = src.roi(rect);
+
+    // Resize for OCR
+    let resized = new cv.Mat();
+    cv.resize(digitROI, resized, new cv.Size(300, 300));
+
+    // Convert ROI to canvas
+    const digitCanvas = document.createElement("canvas");
+    cv.imshow(digitCanvas, resized);
+
+    // --- OCR ON CROPPED DIGIT ONLY ---
+    const result = await Tesseract.recognize(
+      digitCanvas,
+      "eng",
+      {
+        tessedit_char_whitelist: "0123456789",
+        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
+      }
+    );
+
+    const text = result.data.text.replace(/\D/g, "");
+
+    if (text.length === 1) {
+      output.textContent = text;
+    } else {
+      output.textContent = "Retry (align digit)";
+    }
+
+    // Cleanup
+    src.delete();
+    gray.delete();
+    thresh.delete();
+    contours.delete();
+    hierarchy.delete();
+    digitROI.delete();
+    resized.delete();
+  };
 };
