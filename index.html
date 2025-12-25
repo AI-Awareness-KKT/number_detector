@@ -8,7 +8,9 @@
 
   <link rel="stylesheet" href="css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
+
 
 </head>
 <body>
@@ -25,10 +27,10 @@
 
   <!-- MAIN GAME AREA -->
   <main class="container">
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
 
     <canvas id="canvas"></canvas>
-
+    <button id="startCameraBtn">Start Camera</button>
     <button id="detectBtn">Detect Number</button>
 
     <div class="result">
