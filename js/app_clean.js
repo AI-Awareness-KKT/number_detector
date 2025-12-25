@@ -1,386 +1,236 @@
-// js/app.js
+/* =========================================================
+   NUMBER DETECTOR — TEMPLATE MATCHING (FINAL VERIFIED)
+   Works on GitHub Pages + Mobile Safari + Chrome
+   ========================================================= */
+
+/* ---------------- DOM ---------------- */
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
+
 const startBtn = document.getElementById("startCameraBtn");
 const captureBtn = document.getElementById("captureBtn");
 const detectBtn = document.getElementById("detectBtn");
 
-let cameraStarted = false;
-let latestCaptureDataURL = null;
+/* ---------------- CONFIG ---------------- */
+const TEMPLATE_SIZE = 120;
+const BIN_THRESHOLD = 140;
+const CONFIDENCE_THRESHOLD = 60;
 
-// Wait for OpenCV to be ready
-function waitForOpencv() {
-  return new Promise((resolve) => {
-    if (typeof cv !== "undefined" && cv && cv.ready) return resolve();
-    // cv.onRuntimeInitialized will be called by OpenCV when ready
-    const old = window.cv;
-    if (old && old.onRuntimeInitialized) {
-      old.onRuntimeInitialized = () => resolve();
-    } else {
-      // fallback poll
-      const id = setInterval(() => {
-        if (typeof cv !== "undefined" && cv && cv.ready) {
-          clearInterval(id);
-          resolve();
-        }
-      }, 100);
-    }
-  });
-}
+/* ---------------- STATE ---------------- */
+let templates = {};
+let capturedImage = null;
 
-// Start camera (prefer back camera)
+/* =========================================================
+   CAMERA
+   ========================================================= */
 startBtn.onclick = async () => {
-  output.textContent = "Requesting camera...";
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    output.textContent = "Camera not supported in this browser";
-    return;
-  }
-
   try {
     let stream;
+
+    // Prefer back camera on mobile
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false
       });
     } catch {
-      // fallback
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
+      });
     }
+
     video.srcObject = stream;
-    cameraStarted = true;
-    output.textContent = "Camera started. Align the digit and tap Capture.";
-    await waitForOpencv();
-    output.textContent = "Camera started. OpenCV ready. Align digit and tap Capture.";
-  } catch (err) {
-    console.error(err);
-    output.textContent = "Camera access denied or unavailable";
+    output.textContent = "Camera ready";
+  } catch {
+    output.textContent = "Camera access failed";
   }
 };
 
-// Capture frame into canvas and keep a dataURL
+/* =========================================================
+   LOAD DIGIT TEMPLATES (0–9)
+   ========================================================= */
+async function loadTemplates() {
+  for (let d = 0; d <= 9; d++) {
+    const img = new Image();
+    img.src = `templates/${d}.png`;
+    await img.decode();
+
+    const c = document.createElement("canvas");
+    c.width = TEMPLATE_SIZE;
+    c.height = TEMPLATE_SIZE;
+
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE);
+    ctx.drawImage(img, 0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE);
+
+    let imgData = ctx.getImageData(0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE);
+    imgData = binarize(imgData);
+
+    templates[d] = imgData.data;
+  }
+}
+
+/* =========================================================
+   CAPTURE IMAGE
+   ========================================================= */
 captureBtn.onclick = () => {
-  if (!cameraStarted) {
-    output.textContent = "Start camera first";
+  if (!video.videoWidth) {
+    output.textContent = "Camera not ready";
     return;
   }
 
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0);
 
-  // Save the captured image for processing
-  latestCaptureDataURL = canvas.toDataURL("image/png");
-  output.textContent = "Image captured. Press Detect.";
-};
-
-// Utility: draw image from dataURL into canvas sized to given dims
-function drawImageOnCanvas(dataURL, targetCanvas, targetW, targetH) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      targetCanvas.width = targetW;
-      targetCanvas.height = targetH;
-      const ctx = targetCanvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, targetW, targetH);
-      resolve();
-    };
-    img.src = dataURL;
-  });
-}
-
-// Preprocessing pipeline using OpenCV: returns an array of canvases (variants)
-async function generatePreprocessedVariants(dataURL) {
-  // We'll create multiple variants: adaptive threshold, Otsu, morphological cleaned, inverted, deskewed crop
-  const variants = [];
-  const procCanvas = document.createElement("canvas");
-
-  // draw full-size capture at reasonable size
-  await drawImageOnCanvas(dataURL, procCanvas, 800, 800 * (video.videoHeight / video.videoWidth || 1));
-
-  // read into cv Mat
-  let src = cv.imread(procCanvas);
-  // convert to gray
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-  // blur to reduce noise
-  let blurred = new cv.Mat();
-  cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-
-  // try adaptive threshold (good for uneven lighting)
-  let thresh1 = new cv.Mat();
-  cv.adaptiveThreshold(
-    blurred,
-    thresh1,
-    255,
-    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-    cv.THRESH_BINARY_INV,
-    11,
-    2
+  capturedImage = ctx.getImageData(
+    0,
+    0,
+    canvas.width,
+    canvas.height
   );
 
-  // Otsu threshold (global) after Gaussian blur
-  let thresh2 = new cv.Mat();
-  cv.threshold(blurred, thresh2, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+  output.textContent = "Image captured";
+};
 
-  // morphological close to join strokes
-  let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-  let closed1 = new cv.Mat();
-  cv.morphologyEx(thresh1, closed1, cv.MORPH_CLOSE, kernel);
+/* =========================================================
+   BINARIZE IMAGE (BLACK / WHITE)
+   ========================================================= */
+function binarize(imgData) {
+  const d = imgData.data;
 
-  let closed2 = new cv.Mat();
-  cv.morphologyEx(thresh2, closed2, cv.MORPH_CLOSE, kernel);
+  for (let i = 0; i < d.length; i += 4) {
+    const gray =
+      0.299 * d[i] +
+      0.587 * d[i + 1] +
+      0.114 * d[i + 2];
 
-  // Find the largest contour in closed1 to crop ROI (digit area)
-  let contours = new cv.MatVector();
-  let hierarchy = new cv.Mat();
-  cv.findContours(closed1, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-  let roiRect = null;
-  let maxArea = 0;
-  for (let i = 0; i < contours.size(); i++) {
-    const cnt = contours.get(i);
-    const area = cv.contourArea(cnt);
-    if (area > maxArea) {
-      maxArea = area;
-      roiRect = cv.boundingRect(cnt);
-    }
+    const v = gray < BIN_THRESHOLD ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
   }
 
-  function pushCanvasFromMat(mat) {
-    // convert mat to canvas and store dataURL
-    const outCanvas = document.createElement("canvas");
-    cv.imshow(outCanvas, mat);
-    variants.push(outCanvas);
-  }
-
-  // If we found a large contour (digit likely), crop with padding, deskew, and produce variants
-  if (roiRect && maxArea > 500) {
-    const pad = Math.round(Math.min(roiRect.width, roiRect.height) * 0.3);
-    const x1 = Math.max(0, roiRect.x - pad);
-    const y1 = Math.max(0, roiRect.y - pad);
-    const x2 = Math.min(src.cols, roiRect.x + roiRect.width + pad);
-    const y2 = Math.min(src.rows, roiRect.y + roiRect.height + pad);
-
-    const roiMat = src.roi(new cv.Rect(x1, y1, x2 - x1, y2 - y1));
-    // deskew using minAreaRect
-    let tmpContours = new cv.MatVector();
-    let tmpHierarchy = new cv.Mat();
-    let tmpGray = new cv.Mat();
-    cv.cvtColor(roiMat, tmpGray, cv.COLOR_RGBA2GRAY);
-    cv.threshold(tmpGray, tmpGray, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
-    cv.findContours(tmpGray, tmpContours, tmpHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    // find largest inside roi
-    let maxA2 = 0; let big = null;
-    for (let i = 0; i < tmpContours.size(); i++) {
-      const c = tmpContours.get(i);
-      const a = cv.contourArea(c);
-      if (a > maxA2) { maxA2 = a; big = c; }
-    }
-
-    if (big) {
-      const rotRect = cv.minAreaRect(big);
-      const angle = rotRect.angle;
-      // rotate ROI to deskew (if angle significant)
-      const center = new cv.Point(roiMat.cols / 2, roiMat.rows / 2);
-      let M = cv.getRotationMatrix2D(center, angle, 1);
-      let rotated = new cv.Mat();
-      const dsize = new cv.Size(roiMat.cols, roiMat.rows);
-      cv.warpAffine(roiMat, rotated, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255,255,255));
-
-      // produce variants from rotated region
-      let rgray = new cv.Mat();
-      cv.cvtColor(rotated, rgray, cv.COLOR_RGBA2GRAY);
-      let rblur = new cv.Mat();
-      cv.GaussianBlur(rgray, rblur, new cv.Size(3,3),0);
-
-      let rth1 = new cv.Mat();
-      cv.adaptiveThreshold(rblur, rth1, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
-      let rth2 = new cv.Mat();
-      cv.threshold(rblur, rth2, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-
-      // cleaned versions
-      let rclosed1 = new cv.Mat();
-      let rclosed2 = new cv.Mat();
-      let k2 = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
-      cv.morphologyEx(rth1, rclosed1, cv.MORPH_CLOSE, k2);
-      cv.morphologyEx(rth2, rclosed2, cv.MORPH_CLOSE, k2);
-
-      // push a few helpful variants (resize to larger to help OCR)
-      let resized = new cv.Mat();
-      cv.resize(rclosed1, resized, new cv.Size(400, 400), 0, 0, cv.INTER_LINEAR);
-      pushCanvasFromMat(resized);
-      cv.resize(rclosed2, resized, new cv.Size(400, 400), 0, 0, cv.INTER_LINEAR);
-      pushCanvasFromMat(resized);
-
-      // also push inverted (white on black) Tesseract sometimes prefers black text on white: invert if needed
-      let inv = new cv.Mat();
-      cv.bitwise_not(resized, inv);
-      pushCanvasFromMat(inv);
-
-      // clean up
-      rotated.delete(); rgray.delete(); rblur.delete();
-      rth1.delete(); rth2.delete(); rclosed1.delete(); rclosed2.delete();
-      resized.delete(); inv.delete(); k2.delete();
-    }
-
-    tmpContours.delete(); tmpHierarchy.delete(); tmpGray.delete();
-    roiMat.delete();
-  } else {
-    // No large ROI found — fallback: produce variants from whole image
-    let resizedWhole = new cv.Mat();
-    cv.resize(closed1, resizedWhole, new cv.Size(500, 500), 0, 0, cv.INTER_LINEAR);
-    pushCanvasFromMat(resizedWhole);
-    let resizedWhole2 = new cv.Mat();
-    cv.resize(closed2, resizedWhole2, new cv.Size(500, 500), 0, 0, cv.INTER_LINEAR);
-    pushCanvasFromMat(resizedWhole2);
-    cv.bitwise_not(resizedWhole2, resizedWhole2);
-    pushCanvasFromMat(resizedWhole2);
-
-    resizedWhole.delete(); resizedWhole2.delete();
-  }
-
-  // cleanup mats
-  src.delete(); gray.delete(); blurred.delete();
-  thresh1.delete(); thresh2.delete(); closed1.delete(); closed2.delete();
-  kernel.delete(); contours.delete(); hierarchy.delete();
-
-  // variants array contains canvases
-  return variants;
+  return imgData;
 }
 
-// Run Tesseract OCR on a canvas element and return the recognized digit (single char) or null
-async function ocrCanvasForDigit(canvasElement) {
-  try {
-    // Tesseract config - whitelist digits and SINGLE_CHAR page seg mode
-    const result = await Tesseract.recognize(canvasElement, "eng", {
-      tessedit_char_whitelist: "0123456789",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
-    });
-    const text = (result && result.data && result.data.text) ? result.data.text.trim() : "";
-    const digit = text.replace(/\D/g, "");
-    if (digit.length === 1) return digit;
-    return null;
-  } catch (e) {
-    console.error("Tesseract error", e);
-    return null;
+/* =========================================================
+   AUTO-CROP LARGEST DARK REGION
+   ========================================================= */
+function cropDigit(imgData) {
+  const w = imgData.width;
+  const h = imgData.height;
+  const d = imgData.data;
+
+  let minX = w, minY = h, maxX = 0, maxY = 0;
+  let found = false;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (d[i] === 0) {
+        found = true;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
   }
+
+  if (!found) return null;
+
+  const cw = maxX - minX + 1;
+  const ch = maxY - minY + 1;
+
+  if (cw < 40 || ch < 40) return null;
+
+  const c = document.createElement("canvas");
+  c.width = cw;
+  c.height = ch;
+
+  const ctx = c.getContext("2d");
+  ctx.putImageData(imgData, -minX, -minY);
+
+  return c;
 }
 
-// Main detect button: produce variants, run OCR on each, vote
+/* =========================================================
+   DIFFERENCE SCORE (FOREGROUND ONLY)
+   ========================================================= */
+function diffScore(test, template) {
+  let sum = 0;
+  let count = 0;
+
+  for (let i = 0; i < test.length; i += 4) {
+    // Only compare where template is black
+    if (template[i] === 0) {
+      sum += Math.abs(test[i] - template[i]);
+      count++;
+    }
+  }
+
+  return count === 0 ? Infinity : sum / count;
+}
+
+/* =========================================================
+   DETECT DIGIT
+   ========================================================= */
 detectBtn.onclick = async () => {
-  if (!latestCaptureDataURL) {
+  if (!capturedImage) {
     output.textContent = "Capture image first";
     return;
   }
 
-  output.textContent = "Analyzing single digit...";
+  if (Object.keys(templates).length === 0) {
+    output.textContent = "Loading templates...";
+    await loadTemplates();
+  }
 
-  // Ensure OpenCV is ready
-  if (typeof cv === "undefined" || !cv.Mat) {
-    output.textContent = "OpenCV not ready. Reload page.";
+  // Clone & binarize captured image
+  const bin = binarize(new ImageData(
+    new Uint8ClampedArray(capturedImage.data),
+    capturedImage.width,
+    capturedImage.height
+  ));
+
+  // Crop digit
+  const croppedCanvas = cropDigit(bin);
+  if (!croppedCanvas) {
+    output.textContent = "No clear digit";
     return;
   }
 
-  // Load image safely (no onload hang)
-  const img = await createImageBitmap(
-    await (await fetch(latestCaptureDataURL)).blob()
-  );
+  // Normalize size
+  const c = document.createElement("canvas");
+  c.width = TEMPLATE_SIZE;
+  c.height = TEMPLATE_SIZE;
 
-  // Draw to canvas
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, 0, 0);
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE);
+  ctx.drawImage(croppedCanvas, 0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE);
 
-  // ---- OpenCV processing (LIGHTWEIGHT) ----
-  let src = cv.imread(canvas);
-  let gray = new cv.Mat();
-  let thresh = new cv.Mat();
-  let contours = new cv.MatVector();
-  let hierarchy = new cv.Mat();
+  const testData = ctx
+    .getImageData(0, 0, TEMPLATE_SIZE, TEMPLATE_SIZE)
+    .data;
 
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.threshold(
-    gray,
-    thresh,
-    0,
-    255,
-    cv.THRESH_BINARY_INV + cv.THRESH_OTSU
-  );
+  // Match against templates
+  let bestDigit = null;
+  let bestScore = Infinity;
 
-  cv.findContours(
-    thresh,
-    contours,
-    hierarchy,
-    cv.RETR_EXTERNAL,
-    cv.CHAIN_APPROX_SIMPLE
-  );
-
-  if (contours.size() === 0) {
-    output.textContent = "No digit found";
-    cleanup();
-    return;
-  }
-
-  // Find largest contour ONLY
-  let maxArea = 0;
-  let best = null;
-  for (let i = 0; i < contours.size(); i++) {
-    const c = contours.get(i);
-    const area = cv.contourArea(c);
-    if (area > maxArea) {
-      maxArea = area;
-      best = c;
+  for (let d = 0; d <= 9; d++) {
+    const score = diffScore(testData, templates[d]);
+    if (score < bestScore) {
+      bestScore = score;
+      bestDigit = d;
     }
   }
 
-  const rect = cv.boundingRect(best);
-
-  // Reject noise
-  if (rect.width < 60 || rect.height < 60) {
-    output.textContent = "Digit too small";
-    cleanup();
-    return;
-  }
-
-  // Crop digit ROI
-  let roi = src.roi(rect);
-  let resized = new cv.Mat();
-  cv.resize(roi, resized, new cv.Size(300, 300));
-
-  // Convert ROI to canvas for OCR
-  const digitCanvas = document.createElement("canvas");
-  cv.imshow(digitCanvas, resized);
-
-  // ---- OCR (STRICT SINGLE DIGIT) ----
-  const result = await Tesseract.recognize(
-    digitCanvas,
-    "eng",
-    {
-      tessedit_char_whitelist: "0123456789",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
-    }
-  );
-
-  const digit = result.data.text.replace(/\D/g, "");
-
+  // Final decision
   output.textContent =
-    digit.length === 1 ? digit : "Retry (align digit)";
-
-  cleanup();
-
-  function cleanup() {
-    src.delete();
-    gray.delete();
-    thresh.delete();
-    contours.delete();
-    hierarchy.delete();
-    if (roi) roi.delete();
-    if (resized) resized.delete();
-  }
+    bestScore < CONFIDENCE_THRESHOLD
+      ? bestDigit
+      : "No clear digit";
 };
