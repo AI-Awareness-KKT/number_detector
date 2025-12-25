@@ -1,40 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Number Detector</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="stylesheet" href="css/style.css">
-
-  <!-- OCR -->
+  <!-- OpenCV.js (WASM) -->
+  <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
+  <!-- Tesseract (WASM) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-
-  <!-- FULL WIDTH LOGO BANNER -->
   <header class="top-banner">
     <img src="assets/logo.jpg" alt="Logo">
   </header>
 
-  <!-- PAGE TITLE -->
   <section class="page-title">
     <h1>Number Detector</h1>
   </section>
 
-  <!-- MAIN GAME AREA -->
   <main class="container">
     <video id="video" autoplay playsinline muted></video>
 
-    <canvas id="canvas"></canvas>
+    <!-- hidden canvas used for processing -->
+    <canvas id="canvas" style="display:none;"></canvas>
 
-    <!-- REQUIRED BUTTON -->
-    <button id="startCameraBtn">Start Camera</button>
+    <div style="margin-top:14px;">
+      <button id="startCameraBtn">Start Camera</button>
+      <button id="captureBtn">Capture Photo</button>
+      <button id="detectBtn">Detect Number</button>
+    </div>
 
-    <button id="captureBtn">Capture</button>
-    <button id="detectBtn">Detect Number</button>
-
-    <div class="result">
+    <div class="result" style="margin-top:18px;">
       Detected Number:
       <span id="output">—</span>
     </div>
