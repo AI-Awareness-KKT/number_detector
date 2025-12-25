@@ -4,14 +4,11 @@
   <meta charset="UTF-8">
   <title>Number Detector</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
 
   <link rel="stylesheet" href="css/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
 
-
+  <!-- OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
 
@@ -20,7 +17,7 @@
     <img src="assets/logo.jpg" alt="Logo">
   </header>
 
-  <!-- PAGE TITLE BELOW LOGO -->
+  <!-- PAGE TITLE -->
   <section class="page-title">
     <h1>Number Detector</h1>
   </section>
@@ -30,7 +27,11 @@
     <video id="video" autoplay playsinline muted></video>
 
     <canvas id="canvas"></canvas>
+
+    <!-- REQUIRED BUTTON -->
     <button id="startCameraBtn">Start Camera</button>
+
+    <button id="captureBtn">Capture</button>
     <button id="detectBtn">Detect Number</button>
 
     <div class="result">

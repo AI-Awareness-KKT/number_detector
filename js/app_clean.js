@@ -2,58 +2,79 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const output = document.getElementById("output");
 const startBtn = document.getElementById("startCameraBtn");
+const captureBtn = document.getElementById("captureBtn");
 const detectBtn = document.getElementById("detectBtn");
 
-let net;
-let classifier;
 let cameraStarted = false;
 
-/* Start camera on user click */
+/* START CAMERA */
 startBtn.onclick = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: false
-    });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: "environment" } },
+        audio: false
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    }
+
     video.srcObject = stream;
     cameraStarted = true;
-    output.textContent = "Loading model...";
-    await loadModels();
-    output.textContent = "Show digit and press Detect";
-  } catch (e) {
-    alert("Camera access denied or unavailable");
+    output.textContent = "Camera ready. Capture the digit.";
+  } catch {
+    output.textContent = "Camera error";
   }
 };
 
-/* Load models (NO 404 possible) */
-async function loadModels() {
-  net = await mobilenet.load();
-  classifier = knnClassifier.create();
-}
-
-/* Capture frame */
-function captureFrame() {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return tf.browser.fromPixels(canvas);
-}
-
-/* Detect digit */
-detectBtn.onclick = async () => {
-  if (!cameraStarted || !net || !classifier) {
+/* CAPTURE FRAME */
+captureBtn.onclick = () => {
+  if (!cameraStarted) {
     output.textContent = "Start camera first";
     return;
   }
 
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+
+  preprocess(ctx, canvas.width, canvas.height);
+  output.textContent = "Image captured. Click Detect.";
+};
+
+/* IMAGE PREPROCESSING */
+function preprocess(ctx, w, h) {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const bw = gray > 150 ? 255 : 0;
+    d[i] = d[i + 1] = d[i + 2] = bw;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* DETECT NUMBER */
+detectBtn.onclick = async () => {
   output.textContent = "Detecting...";
 
-  const img = captureFrame();
-  const activation = net.infer(img, true);
+  try {
+    const result = await Tesseract.recognize(
+      canvas,
+      "eng",
+      {
+        tessedit_char_whitelist: "0123456789",
+        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_CHAR
+      }
+    );
 
-  // Temporary demo logic (shows structure works)
-  output.textContent = "Camera + ML working ✔";
+    const digit = result.data.text.replace(/\D/g, "");
+    output.textContent = digit || "No digit detected";
 
-  img.dispose();
+  } catch {
+    output.textContent = "Detection failed";
+  }
 };
